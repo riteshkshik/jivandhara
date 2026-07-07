@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../sign_up_login_screen.dart';
+import '../../../core/booking_state.dart';
 
 class AuthFormWidget extends StatefulWidget {
   final AuthMode authMode;
@@ -56,6 +57,25 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
     await Future.delayed(const Duration(milliseconds: 800));
     if (mounted) {
       setState(() => _isLoading = false);
+      await BookingState.instance.setRole(widget.selectedRole);
+      
+      // Customize names for demo or signup
+      if (widget.authMode == AuthMode.signUp) {
+        BookingState.instance.setPatientDetails(
+          name: _nameController.text.isNotEmpty ? _nameController.text : "Priya Sharma",
+          phone: _phoneController.text.isNotEmpty ? _phoneController.text : "+91 98765 43210",
+        );
+      } else {
+        if (_emailController.text == 'rajan.patel@jivandhara.in') {
+          // Driver
+        } else {
+          // Patient
+          BookingState.instance.setPatientDetails(
+            name: "Priya Sharma",
+            phone: "+91 98765 43210",
+          );
+        }
+      }
       widget.onSubmit();
     }
   }
@@ -65,6 +85,11 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
     try {
       final GoogleSignInAccount? account = await _googleSignIn.signIn();
       if (account != null && mounted) {
+        await BookingState.instance.setRole(widget.selectedRole);
+        BookingState.instance.setPatientDetails(
+          name: account.displayName ?? "Priya Sharma",
+          phone: "+91 98765 43210",
+        );
         widget.onSubmit();
       }
     } catch (e) {

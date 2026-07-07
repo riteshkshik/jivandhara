@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>GoogleMapsAPIKey</key>
+	<string>$(MAPS_API_KEY)</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs access to your location to track the ambulance route and show your live position on the map.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs access to your location to track the ambulance route and show your live position on the map.</string>
 </dict>
 </plist>

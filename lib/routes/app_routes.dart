@@ -141,14 +141,3 @@ final GoRouter appRouter = GoRouter(
   ],
 );
 
-class _ProfilePlaceholder extends StatelessWidget {
-  const _ProfilePlaceholder();
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      body: const Center(child: Text('Profile')),
-    );
-  }
-}

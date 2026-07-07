@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
+import '../../core/booking_state.dart';
 import './widgets/calendar_strip_widget.dart';
 import './widgets/emergency_booking_card_widget.dart';
 import './widgets/service_type_grid_widget.dart';
 import './widgets/user_header_widget.dart';
+import './widgets/nearby_ambulances_widget.dart';
+import './widgets/driver_dashboard_widget.dart';
+import '../sign_up_login_screen/sign_up_login_screen.dart' show UserRole;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,7 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedHour = TimeOfDay.now().hour;
   int _selectedMinute = TimeOfDay.now().minute;
   bool _showEtaPopup = false;
-  final GlobalKey _bellKey = GlobalKey();
 
   String get _formattedTime {
     final h = _selectedHour.toString().padLeft(2, '0');
@@ -127,16 +130,56 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final isTablet = MediaQuery.of(context).size.width >= 600;
 
-    return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            isTablet ? _buildTabletLayout(theme) : _buildPhoneLayout(theme),
-            if (_showEtaPopup) _buildEtaOverlay(theme),
-          ],
-        ),
-      ),
+    return ListenableBuilder(
+      listenable: BookingState.instance,
+      builder: (context, child) {
+        final state = BookingState.instance;
+        final isDriver = state.currentRole == UserRole.driver;
+
+        return Scaffold(
+          backgroundColor: theme.colorScheme.surface,
+          appBar: isDriver
+              ? AppBar(
+                  backgroundColor: theme.colorScheme.surface,
+                  elevation: 0,
+                  scrolledUnderElevation: 1,
+                  title: Row(
+                    children: [
+                      Icon(Icons.drive_eta_rounded, color: theme.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Driver Companion Hub",
+                        style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.logout_rounded),
+                      onPressed: () {
+                        state.reset();
+                        context.go('/sign-up-login-screen');
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                )
+              : null,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                isDriver
+                    ? const DriverDashboardWidget()
+                    : (isTablet ? _buildTabletLayout(theme) : _buildPhoneLayout(theme)),
+                if (!isDriver && _showEtaPopup) _buildEtaOverlay(theme),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -390,14 +433,16 @@ class _HomeScreenState extends State<HomeScreen> {
             delegate: SliverChildListDelegate([
               const SizedBox(height: 8),
               EmergencyBookingCardWidget(
-                onBook: () => context.push(
-                  '/booking-confirmation-screen',
-                  extra: {
-                    'serviceType': 'Basic Life Support',
-                    'isEmergency': true,
-                  },
-                ),
+                onBook: () {
+                  BookingState.instance.requestBooking(
+                    serviceType: 'Basic Life Support',
+                    isEmergency: true,
+                  );
+                  context.push('/booking-status-screen');
+                },
               ),
+              const SizedBox(height: 24),
+              const NearbyAmbulancesWidget(),
               const SizedBox(height: 24),
               _buildAmbulanceTypesHeader(Theme.of(context)),
               const SizedBox(height: 12),

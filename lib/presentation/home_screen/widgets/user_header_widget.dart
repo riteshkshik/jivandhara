@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/app_export.dart';
 import '../../../core/profile_notifier.dart';
+import '../../../core/auth_service.dart';
 
 class UserHeaderWidget extends StatefulWidget {
   const UserHeaderWidget({super.key});
@@ -29,15 +29,15 @@ class _UserHeaderWidgetState extends State<UserHeaderWidget> {
     super.dispose();
   }
 
-  Future<void> _loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final name = prefs.getString('profile_full_name');
-    final imageUrl = prefs.getString('profile_image_url');
+  void _loadProfile() {
+    final auth = AuthService.instance;
     if (mounted) {
       setState(() {
-        if (name != null && name.trim().isNotEmpty) _name = name.trim();
-        if (imageUrl != null && imageUrl.trim().isNotEmpty) {
-          _imageUrl = imageUrl.trim();
+        if (auth.fullName != null && auth.fullName!.trim().isNotEmpty) {
+          _name = auth.fullName!.trim();
+        }
+        if (auth.profileImageUrl != null && auth.profileImageUrl!.trim().isNotEmpty) {
+          _imageUrl = auth.profileImageUrl!.trim();
         }
       });
     }

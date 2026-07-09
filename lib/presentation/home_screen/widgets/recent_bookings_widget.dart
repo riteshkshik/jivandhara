@@ -1,138 +1,164 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_export.dart';
+import '../../../core/booking_service.dart';
 import '../../../widgets/status_badge_widget.dart';
 
-class _BookingItem {
-  final String id;
+class RecentBookingsWidget extends StatefulWidget {
+  const RecentBookingsWidget({super.key});
+
+  @override
+  State<RecentBookingsWidget> createState() => _RecentBookingsWidgetState();
+}
+
+class _RecentBookingsWidgetState extends State<RecentBookingsWidget> {
+  List<dynamic> _bookings = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchBookings();
+  }
+
+  Future<void> _fetchBookings() async {
+    try {
+      final bookings = await BookingService.instance.getBookings();
+      if (mounted) {
+        setState(() {
+          // Show only the last 4 bookings
+          _bookings = bookings.take(4).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[RecentBookingsWidget] Error fetching bookings: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  BookingStatus _statusFromString(String? v) {
+    switch (v) {
+      case 'pending':
+        return BookingStatus.pending;
+      case 'searching':
+        return BookingStatus.searching;
+      case 'accepted':
+        return BookingStatus.accepted;
+      case 'enRoute':
+        return BookingStatus.enRoute;
+      case 'arrived':
+        return BookingStatus.arrived;
+      case 'completed':
+        return BookingStatus.completed;
+      case 'cancelled':
+        return BookingStatus.cancelled;
+      default:
+        return BookingStatus.pending;
+    }
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null) return '';
+    try {
+      final date = DateTime.parse(dateStr);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
+    } catch (_) {
+      return dateStr;
+    }
+  }
+
+  String _formatTime(String? dateStr) {
+    if (dateStr == null) return '';
+    try {
+      final date = DateTime.parse(dateStr);
+      final hour = date.hour;
+      final minute = date.minute.toString().padLeft(2, '0');
+      final amPm = hour >= 12 ? 'PM' : 'AM';
+      final h12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      return '${h12.toString().padLeft(2, '0')}:$minute $amPm';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+        ),
+      );
+    }
+
+    if (_bookings.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: Text(
+            'No recent bookings',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: _bookings.map((b) {
+        final booking = b as Map<String, dynamic>;
+        final patientName = booking['patientId'] is Map
+            ? (booking['patientId'] as Map)['fullName']?.toString() ?? 'Patient'
+            : booking['serviceType']?.toString() ?? 'Booking';
+        final serviceType = booking['serviceType']?.toString() ?? '';
+        final date = _formatDate(booking['createdAt']?.toString());
+        final time = _formatTime(booking['createdAt']?.toString());
+        final status = _statusFromString(booking['status']?.toString());
+        final amount = '₹${(booking['estimatedFare'] as num?)?.toStringAsFixed(0) ?? '0'}';
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _BookingListItem(
+            patientName: patientName,
+            serviceType: serviceType,
+            date: date,
+            time: time,
+            status: status,
+            amount: amount,
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _BookingListItem extends StatelessWidget {
   final String patientName;
   final String serviceType;
   final String date;
   final String time;
   final BookingStatus status;
   final String amount;
-  final String imageUrl;
-  final String semanticLabel;
 
-  const _BookingItem({
-    required this.id,
+  const _BookingListItem({
     required this.patientName,
     required this.serviceType,
     required this.date,
     required this.time,
     required this.status,
     required this.amount,
-    required this.imageUrl,
-    required this.semanticLabel,
   });
-}
-
-final List<Map<String, dynamic>> _bookingMaps = [
-  {
-    'id': 'JVN-20240628-001',
-    'patientName': 'Priya Sharma',
-    'serviceType': 'Advanced Life Support',
-    'date': '28 Jun 2024',
-    'time': '09:41 AM',
-    'status': 'completed',
-    'amount': '₹1,200',
-    'imageUrl':
-        'https://images.unsplash.com/photo-1652396944757-ad27b62b33f6',
-    'semanticLabel': 'Young Indian woman with dark hair and a warm smile',
-  },
-  {
-    'id': 'JVN-20240627-004',
-    'patientName': 'Ramesh Iyer',
-    'serviceType': 'Basic Life Support',
-    'date': '27 Jun 2024',
-    'time': '03:15 PM',
-    'status': 'completed',
-    'amount': '₹800',
-    'imageUrl':
-        'https://img.rocket.new/generatedImages/rocket_gen_img_1cb468779-1763295443265.png',
-    'semanticLabel':
-        'Middle-aged Indian man with glasses and a professional expression',
-  },
-  {
-    'id': 'JVN-20240626-002',
-    'patientName': 'Sunita Devi',
-    'serviceType': 'Neonatal Ambulance',
-    'date': '26 Jun 2024',
-    'time': '11:30 AM',
-    'status': 'cancelled',
-    'amount': '₹0',
-    'imageUrl':
-        'https://images.unsplash.com/photo-1632110287190-7b6807b7ad2e',
-    'semanticLabel':
-        'Elderly Indian woman with grey hair and a kind expression',
-  },
-  {
-    'id': 'JVN-20240625-007',
-    'patientName': 'Arjun Mehta',
-    'serviceType': 'Advanced Life Support',
-    'date': '25 Jun 2024',
-    'time': '08:00 AM',
-    'status': 'completed',
-    'amount': '₹1,500',
-    'imageUrl':
-        'https://img.rocket.new/generatedImages/rocket_gen_img_17e73fd76-1763296016522.png',
-    'semanticLabel': 'Young Indian man with short hair and a confident look',
-  },
-];
-
-BookingStatus _statusFromString(String v) {
-  switch (v) {
-    case 'pending':
-      return BookingStatus.pending;
-    case 'accepted':
-      return BookingStatus.accepted;
-    case 'enRoute':
-      return BookingStatus.enRoute;
-    case 'arrived':
-      return BookingStatus.arrived;
-    case 'completed':
-      return BookingStatus.completed;
-    case 'cancelled':
-      return BookingStatus.cancelled;
-    default:
-      return BookingStatus.pending;
-  }
-}
-
-_BookingItem _bookingFromMap(Map<String, dynamic> m) => _BookingItem(
-  id: m['id'] as String,
-  patientName: m['patientName'] as String,
-  serviceType: m['serviceType'] as String,
-  date: m['date'] as String,
-  time: m['time'] as String,
-  status: _statusFromString(m['status'] as String),
-  amount: m['amount'] as String,
-  imageUrl: m['imageUrl'] as String,
-  semanticLabel: m['semanticLabel'] as String,
-);
-
-class RecentBookingsWidget extends StatelessWidget {
-  const RecentBookingsWidget({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = _bookingMaps.map(_bookingFromMap).toList();
-    return Column(
-      children: items
-          .map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _BookingListItem(item: item),
-            ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class _BookingListItem extends StatelessWidget {
-  final _BookingItem item;
-  const _BookingListItem({required this.item});
 
   @override
   Widget build(BuildContext context) {
@@ -162,20 +188,13 @@ class _BookingListItem extends StatelessWidget {
                 height: 46,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
+                  color: theme.colorScheme.primaryContainer,
                   border: Border.all(
                     color: theme.colorScheme.outline,
                     width: 1,
                   ),
                 ),
-                child: ClipOval(
-                  child: CustomImageWidget(
-                    imageUrl: item.imageUrl,
-                    width: 46,
-                    height: 46,
-                    fit: BoxFit.cover,
-                    semanticLabel: item.semanticLabel,
-                  ),
-                ),
+                child: Icon(Icons.local_hospital_rounded, size: 22, color: theme.colorScheme.primary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -183,7 +202,7 @@ class _BookingListItem extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.patientName,
+                      patientName,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -192,7 +211,7 @@ class _BookingListItem extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      item.serviceType,
+                      serviceType,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         fontWeight: FontWeight.w400,
@@ -201,7 +220,7 @@ class _BookingListItem extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${item.date} · ${item.time}',
+                      '$date · $time',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
                         fontWeight: FontWeight.w400,
@@ -215,10 +234,10 @@ class _BookingListItem extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  StatusBadgeWidget(status: item.status),
+                  StatusBadgeWidget(status: status),
                   const SizedBox(height: 6),
                   Text(
-                    item.amount,
+                    amount,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,

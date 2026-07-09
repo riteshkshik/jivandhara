@@ -286,7 +286,7 @@ class _BookingStatusScreenState extends State<BookingStatusScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              "DRIVER APP RINGING",
+              "INCOMING BOOKING",
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
@@ -296,14 +296,14 @@ class _BookingStatusScreenState extends State<BookingStatusScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              "Simulated Incoming Request",
+              "Incoming Booking Request",
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              "An emergency booking alert has been received on the driver's device (${state.driverName}).",
+              "${state.serviceType} — ${state.pickupAddress.isNotEmpty ? state.pickupAddress : 'Pickup location'}\nPatient: ${state.patientName}\nFare: ${state.estimatedFare}",
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -315,12 +315,7 @@ class _BookingStatusScreenState extends State<BookingStatusScreen> {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () {
-                      state.cancelBooking();
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go('/home-screen');
-                      }
+                      state.declineBooking();
                     },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.redAccent,

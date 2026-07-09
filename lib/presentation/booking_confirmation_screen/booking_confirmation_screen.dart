@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 
 import '../../core/app_export.dart';
+import '../../core/booking_state.dart';
 
 class BookingConfirmationScreen extends StatefulWidget {
   final String? serviceType;
   final String? scheduledDate;
   final String? scheduledTime;
   final bool isEmergency;
+  final String? bookingId;
 
   const BookingConfirmationScreen({
     super.key,
@@ -15,6 +16,7 @@ class BookingConfirmationScreen extends StatefulWidget {
     this.scheduledDate,
     this.scheduledTime,
     this.isEmergency = false,
+    this.bookingId,
   });
 
   @override
@@ -31,17 +33,17 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   late Animation<double> _fadeAnimation;
   late Animation<double> _pulseAnimation;
 
-  final String _bookingId = _generateBookingId();
+  late final String _bookingId;
 
-  static String _generateBookingId() {
-    final now = DateTime.now();
-    final rand = Random().nextInt(999).toString().padLeft(3, '0');
-    return 'JVN-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-$rand';
+  void _initBookingId() {
+    // Use real booking ID from navigation extras or BookingState, fallback to generated
+    _bookingId = widget.bookingId ?? BookingState.instance.bookingId ?? 'JVN-PENDING';
   }
 
   @override
   void initState() {
     super.initState();
+    _initBookingId();
 
     _checkController = AnimationController(
       vsync: this,

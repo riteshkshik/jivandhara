@@ -1,90 +1,99 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../widgets/status_badge_widget.dart';
-import '../../widgets/custom_image_widget.dart';
+import '../../core/booking_service.dart';
+import '../../core/auth_service.dart';
 
-class _BookingHistoryItem {
-  final String id;
-  final String serviceType;
-  final String date;
-  final String time;
-  final BookingStatus status;
-  final String amount;
-  final String pickupAddress;
+class BookingsScreen extends StatefulWidget {
+  const BookingsScreen({super.key});
 
-  const _BookingHistoryItem({
-    required this.id,
-    required this.serviceType,
-    required this.date,
-    required this.time,
-    required this.status,
-    required this.amount,
-    required this.pickupAddress,
-  });
+  @override
+  State<BookingsScreen> createState() => _BookingsScreenState();
 }
 
-// Last 5 bookings made by the currently logged-in customer: Ravi Sharma
-final List<_BookingHistoryItem> _last5Bookings = [
-  _BookingHistoryItem(
-    id: 'JVN-20240628-009',
-    serviceType: 'Advanced Life Support',
-    date: '28 Jun 2024',
-    time: '09:41 AM',
-    status: BookingStatus.completed,
-    amount: '₹1,200',
-    pickupAddress: '14B, MG Road, Bengaluru — 560001',
-  ),
-  _BookingHistoryItem(
-    id: 'JVN-20240627-004',
-    serviceType: 'Basic Life Support',
-    date: '27 Jun 2024',
-    time: '03:15 PM',
-    status: BookingStatus.completed,
-    amount: '₹800',
-    pickupAddress: '22, Koramangala 5th Block, Bengaluru — 560095',
-  ),
-  _BookingHistoryItem(
-    id: 'JVN-20240626-002',
-    serviceType: 'Neonatal Ambulance',
-    date: '26 Jun 2024',
-    time: '11:30 AM',
-    status: BookingStatus.cancelled,
-    amount: '₹0',
-    pickupAddress: '7, Indiranagar 100ft Road, Bengaluru — 560038',
-  ),
-  _BookingHistoryItem(
-    id: 'JVN-20240625-007',
-    serviceType: 'Advanced Life Support',
-    date: '25 Jun 2024',
-    time: '08:00 AM',
-    status: BookingStatus.completed,
-    amount: '₹1,500',
-    pickupAddress: '3, Whitefield Main Road, Bengaluru — 560066',
-  ),
-  _BookingHistoryItem(
-    id: 'JVN-20240623-011',
-    serviceType: 'Patient Transport',
-    date: '23 Jun 2024',
-    time: '06:20 PM',
-    status: BookingStatus.completed,
-    amount: '₹650',
-    pickupAddress: '9, Jayanagar 4th Block, Bengaluru — 560041',
-  ),
-];
+class _BookingsScreenState extends State<BookingsScreen> {
+  List<dynamic> _bookings = [];
+  bool _isLoading = true;
+  String? _error;
 
-// Current logged-in profile user
-const _currentUserName = 'Ravi Sharma';
-const _currentUserImageUrl =
-    'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg';
-const _currentUserSemanticLabel =
-    'Indian man in his thirties with short dark hair and a confident expression';
+  @override
+  void initState() {
+    super.initState();
+    _fetchBookings();
+  }
 
-class BookingsScreen extends StatelessWidget {
-  const BookingsScreen({super.key});
+  Future<void> _fetchBookings() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final bookings = await BookingService.instance.getBookings();
+      if (mounted) {
+        setState(() {
+          _bookings = bookings;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load bookings';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  BookingStatus _mapStatus(String? statusStr) {
+    switch (statusStr) {
+      case 'completed':
+        return BookingStatus.completed;
+      case 'cancelled':
+        return BookingStatus.cancelled;
+      case 'accepted':
+        return BookingStatus.accepted;
+      case 'enRoute':
+        return BookingStatus.enRoute;
+      case 'arrived':
+        return BookingStatus.arrived;
+      case 'searching':
+        return BookingStatus.searching;
+      default:
+        return BookingStatus.idle;
+    }
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null) return '';
+    try {
+      final date = DateTime.parse(dateStr);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
+    } catch (_) {
+      return dateStr;
+    }
+  }
+
+  String _formatTime(String? dateStr) {
+    if (dateStr == null) return '';
+    try {
+      final date = DateTime.parse(dateStr);
+      final hour = date.hour;
+      final minute = date.minute.toString().padLeft(2, '0');
+      final amPm = hour >= 12 ? 'PM' : 'AM';
+      final h12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      return '${h12.toString().padLeft(2, '0')}:$minute $amPm';
+    } catch (_) {
+      return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final userName = AuthService.instance.fullName ?? 'User';
+
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
@@ -115,19 +124,14 @@ class BookingsScreen extends StatelessWidget {
                     height: 36,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
+                      color: theme.colorScheme.primaryContainer,
                       border: Border.all(
                         color: theme.colorScheme.primary.withAlpha(80),
                         width: 2,
                       ),
                     ),
                     child: ClipOval(
-                      child: CustomImageWidget(
-                        imageUrl: _currentUserImageUrl,
-                        width: 36,
-                        height: 36,
-                        fit: BoxFit.cover,
-                        semanticLabel: _currentUserSemanticLabel,
-                      ),
+                      child: Icon(Icons.person_rounded, size: 20, color: theme.colorScheme.primary),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -135,7 +139,7 @@ class BookingsScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _currentUserName,
+                        userName,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -143,7 +147,9 @@ class BookingsScreen extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Last 5 bookings',
+                        _isLoading
+                            ? 'Loading bookings...'
+                            : '${_bookings.length} booking${_bookings.length != 1 ? 's' : ''}',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 12,
                           fontWeight: FontWeight.w400,
@@ -156,25 +162,110 @@ class BookingsScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                itemCount: _last5Bookings.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  return _BookingHistoryCard(item: _last5Bookings[index]);
-                },
-              ),
+              child: _buildContent(theme),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildContent(ThemeData theme) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 48, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(height: 12),
+            Text(_error!, style: GoogleFonts.plusJakartaSans(
+              fontSize: 14, color: theme.colorScheme.onSurfaceVariant,
+            )),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _fetchBookings,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text('Retry', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_bookings.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_rounded, size: 48, color: theme.colorScheme.onSurfaceVariant.withAlpha(120)),
+            const SizedBox(height: 12),
+            Text('No bookings yet', style: GoogleFonts.plusJakartaSans(
+              fontSize: 16, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant,
+            )),
+            const SizedBox(height: 4),
+            Text('Your booking history will appear here', style: GoogleFonts.plusJakartaSans(
+              fontSize: 13, color: theme.colorScheme.onSurfaceVariant.withAlpha(160),
+            )),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchBookings,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        itemCount: _bookings.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          final b = _bookings[index] as Map<String, dynamic>;
+          return _BookingHistoryCard(
+            id: b['id']?.toString() ?? b['_id']?.toString() ?? '',
+            serviceType: b['serviceType']?.toString() ?? 'Unknown',
+            date: _formatDate(b['createdAt']?.toString()),
+            time: _formatTime(b['createdAt']?.toString()),
+            status: _mapStatus(b['status']?.toString()),
+            amount: '₹${(b['estimatedFare'] as num?)?.toStringAsFixed(0) ?? '0'}',
+            pickupAddress: b['pickupAddress']?.toString() ?? '',
+            patientName: b['patientId'] is Map
+                ? (b['patientId'] as Map)['fullName']?.toString() ?? ''
+                : '',
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _BookingHistoryCard extends StatelessWidget {
-  final _BookingHistoryItem item;
-  const _BookingHistoryCard({required this.item});
+  final String id;
+  final String serviceType;
+  final String date;
+  final String time;
+  final BookingStatus status;
+  final String amount;
+  final String pickupAddress;
+  final String patientName;
+
+  const _BookingHistoryCard({
+    required this.id,
+    required this.serviceType,
+    required this.date,
+    required this.time,
+    required this.status,
+    required this.amount,
+    required this.pickupAddress,
+    required this.patientName,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -203,20 +294,10 @@ class _BookingHistoryCard extends StatelessWidget {
                   height: 46,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: theme.colorScheme.outline,
-                      width: 1,
-                    ),
+                    color: theme.colorScheme.primaryContainer,
+                    border: Border.all(color: theme.colorScheme.outline, width: 1),
                   ),
-                  child: ClipOval(
-                    child: CustomImageWidget(
-                      imageUrl: _currentUserImageUrl,
-                      width: 46,
-                      height: 46,
-                      fit: BoxFit.cover,
-                      semanticLabel: _currentUserSemanticLabel,
-                    ),
-                  ),
+                  child: Icon(Icons.local_hospital_rounded, size: 22, color: theme.colorScheme.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -224,7 +305,7 @@ class _BookingHistoryCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _currentUserName,
+                        patientName.isNotEmpty ? patientName : serviceType,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -234,7 +315,7 @@ class _BookingHistoryCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        item.serviceType,
+                        serviceType,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 12,
                           fontWeight: FontWeight.w400,
@@ -249,10 +330,10 @@ class _BookingHistoryCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    StatusBadgeWidget(status: item.status),
+                    StatusBadgeWidget(status: status),
                     const SizedBox(height: 6),
                     Text(
-                      item.amount,
+                      amount,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -272,15 +353,11 @@ class _BookingHistoryCard extends StatelessWidget {
             const SizedBox(height: 10),
             Row(
               children: [
-                Icon(
-                  Icons.location_on_outlined,
-                  size: 14,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                Icon(Icons.location_on_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    item.pickupAddress,
+                    pickupAddress,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 12,
                       fontWeight: FontWeight.w400,
@@ -298,14 +375,10 @@ class _BookingHistoryCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(
-                      Icons.calendar_today_outlined,
-                      size: 13,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    Icon(Icons.calendar_today_outlined, size: 13, color: theme.colorScheme.onSurfaceVariant),
                     const SizedBox(width: 4),
                     Text(
-                      '${item.date} · ${item.time}',
+                      '$date · $time',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         fontWeight: FontWeight.w400,
@@ -315,7 +388,7 @@ class _BookingHistoryCard extends StatelessWidget {
                   ],
                 ),
                 Text(
-                  item.id,
+                  id,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,

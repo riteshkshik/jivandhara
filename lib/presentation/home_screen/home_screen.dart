@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
 import '../../core/booking_state.dart';
+import '../../core/auth_service.dart';
+import '../../core/socket_service.dart';
 import './widgets/calendar_strip_widget.dart';
 import './widgets/emergency_booking_card_widget.dart';
 import './widgets/service_type_grid_widget.dart';
@@ -159,9 +161,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   actions: [
                     IconButton(
                       icon: const Icon(Icons.logout_rounded),
-                      onPressed: () {
+                      onPressed: () async {
                         state.reset();
-                        context.go('/sign-up-login-screen');
+                        SocketService.instance.disconnect();
+                        await AuthService.instance.logout();
+                        if (context.mounted) {
+                          context.go('/');
+                        }
                       },
                     ),
                     const SizedBox(width: 8),

@@ -1,5 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../../core/booking_state.dart';
+import '../../../core/auth_service.dart';
+import '../../../core/profile_service.dart';
+import '../../../core/socket_service.dart';
 import '../../../core/app_export.dart';
 
 class DriverDashboardWidget extends StatefulWidget {
@@ -11,6 +16,40 @@ class DriverDashboardWidget extends StatefulWidget {
 
 class _DriverDashboardWidgetState extends State<DriverDashboardWidget> {
   bool _isOnline = true;
+  Timer? _locationTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLocationStreaming();
+  }
+
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startLocationStreaming() {
+    // Send driver location every 5 seconds if online
+    _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!_isOnline) return;
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 4),
+          ),
+        );
+        SocketService.instance.emitLocationUpdate(
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+        );
+      } catch (e) {
+        debugPrint('[DriverDashboard] Location stream error: $e');
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +109,7 @@ class _DriverDashboardWidgetState extends State<DriverDashboardWidget> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Rajan Patel",
+                  AuthService.instance.fullName ?? "Driver",
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -78,7 +117,7 @@ class _DriverDashboardWidgetState extends State<DriverDashboardWidget> {
                   ),
                 ),
                 Text(
-                  "Ambulance: KA 01 AB 2345 (ALS)",
+                  "Ambulance Driver",
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
@@ -127,14 +166,19 @@ class _DriverDashboardWidgetState extends State<DriverDashboardWidget> {
           ),
           Switch(
             value: _isOnline,
-            onChanged: (val) {
+            onChanged: (val) async {
               setState(() {
                 _isOnline = val;
                 if (!_isOnline) {
-                  // Reset status if driver goes offline
                   BookingState.instance.reset();
                 }
               });
+              // Update online status on the server
+              try {
+                await ProfileService.instance.updateProfile(isOnline: val);
+              } catch (e) {
+                debugPrint('[DriverDashboard] Failed to update online status: $e');
+              }
             },
             activeThumbColor: const Color(0xFF2E7D32),
             activeTrackColor: const Color(0xFFE8F5E9),
@@ -303,7 +347,7 @@ class _DriverDashboardWidgetState extends State<DriverDashboardWidget> {
             children: [
               Expanded(
                 child: TextButton(
-                  onPressed: () => state.cancelBooking(),
+                  onPressed: () => state.declineBooking(),
                   child: Text(
                     "Decline",
                     style: GoogleFonts.plusJakartaSans(

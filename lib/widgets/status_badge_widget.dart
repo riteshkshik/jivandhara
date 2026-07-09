@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-enum BookingStatus { pending, accepted, enRoute, arrived, completed, cancelled }
+enum BookingStatus { idle, pending, searching, accepted, enRoute, arrived, completed, cancelled }
 
 class StatusBadgeWidget extends StatelessWidget {
   final BookingStatus status;
@@ -30,11 +30,23 @@ class StatusBadgeWidget extends StatelessWidget {
 
   _StatusConfig _statusConfig(BookingStatus s) {
     switch (s) {
+      case BookingStatus.idle:
+        return _StatusConfig(
+          'Idle',
+          const Color(0xFFEEEEEE),
+          const Color(0xFF757575),
+        );
       case BookingStatus.pending:
         return _StatusConfig(
           'Pending',
           const Color(0xFFFFF3E0),
           const Color(0xFFE65100),
+        );
+      case BookingStatus.searching:
+        return _StatusConfig(
+          'Searching',
+          const Color(0xFFFFF8E1),
+          const Color(0xFFF9A825),
         );
       case BookingStatus.accepted:
         return _StatusConfig(
@@ -63,8 +75,8 @@ class StatusBadgeWidget extends StatelessWidget {
       case BookingStatus.cancelled:
         return _StatusConfig(
           'Cancelled',
-          const Color(0xFFE0FFF8),
-          const Color(0xFF00C9A7),
+          const Color(0xFFFFEBEE),
+          const Color(0xFFD32F2F),
         );
     }
   }

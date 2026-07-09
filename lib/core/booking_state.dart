@@ -4,6 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
 import '../presentation/sign_up_login_screen/sign_up_login_screen.dart' show UserRole;
+import 'socket_service.dart';
+import 'booking_service.dart';
+
 
 enum BookingStatus {
   idle,
@@ -18,57 +21,75 @@ class BookingState extends ChangeNotifier {
   static final BookingState instance = BookingState._internal();
   BookingState._internal() {
     _loadFromPrefs();
+    _registerSocketHandlers();
   }
 
-  // Active User Role
+  // ─── Active User Role ───
   UserRole _currentRole = UserRole.patient;
   UserRole get currentRole => _currentRole;
 
-  // Active Booking state
+  // ─── Active Booking state ───
   BookingStatus _status = BookingStatus.idle;
   BookingStatus get status => _status;
 
   String? _bookingId;
   String? get bookingId => _bookingId;
 
-  String _patientName = "Priya Sharma";
+  String _patientName = "User";
   String get patientName => _patientName;
 
-  final String _pickupAddress = "14B, MG Road, Bengaluru — 560001";
+  String _pickupAddress = "";
   String get pickupAddress => _pickupAddress;
 
   String _serviceType = "Basic Life Support";
   String get serviceType => _serviceType;
 
-  final String _estimatedFare = "₹1,200";
-  String get estimatedFare => _estimatedFare;
+  double _estimatedFare = 0;
+  String get estimatedFare => '₹${_estimatedFare.toStringAsFixed(0)}';
+  double get estimatedFareRaw => _estimatedFare;
 
-  // Coordinates
-  // Patient Location: Bengaluru MG Road
-  final double patientLat = 12.9716;
-  final double patientLng = 77.5946;
+  // ─── Coordinates ───
+  double _patientLat = 12.9716;
+  double _patientLng = 77.5946;
+  double get patientLat => _patientLat;
+  double get patientLng => _patientLng;
 
-  // Driver Location (Starts at some offset, moves towards patient)
-  double _driverLat = 12.9850;
-  double _driverLng = 77.6080;
+  double _driverLat = 0;
+  double _driverLng = 0;
   double get driverLat => _driverLat;
   double get driverLng => _driverLng;
 
-  // Real route coordinates snapped to roads
+  // Route coordinates (still from Google Directions API)
   List<List<double>> _routePoints = [];
   List<List<double>> get routePoints => _routePoints;
 
-  // Driver Info
-  final String driverName = "Rajesh Kumar";
-  final String driverPhone = "+91 98765 43210";
-  final String driverRating = "4.8";
-  final String vehicleRegNo = "KA 01 AB 2345";
-  final String experience = "8+ years experience";
+  // ─── Driver Info (populated from server via socket events) ───
+  String _driverName = "";
+  String _driverPhone = "";
+  String _driverRating = "5.0";
+  String _vehicleRegNo = "";
+  String _experience = "";
+  String get driverName => _driverName;
+  String get driverPhone => _driverPhone;
+  String get driverRating => _driverRating;
+  String get vehicleRegNo => _vehicleRegNo;
+  String get experience => _experience;
 
-  Timer? _simulationTimer;
-  int _simulationStep = 0;
+  // ─── Incoming request popup (Driver role) ───
+  bool _showIncomingRequestPopup = false;
+  bool get showIncomingRequestPopup => _showIncomingRequestPopup;
+  Map<String, dynamic>? _incomingAlertData;
+  Map<String, dynamic>? get incomingAlertData => _incomingAlertData;
 
-  // Load saved configurations
+  // ─── No drivers available flag ───
+  bool _noDriversAvailable = false;
+  bool get noDriversAvailable => _noDriversAvailable;
+
+  // ─── Booking creation time ───
+  DateTime? _bookingCreatedAt;
+  DateTime? get bookingCreatedAt => _bookingCreatedAt;
+
+  // ─── Load saved configurations ───
   Future<void> _loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final roleStr = prefs.getString('user_role');
@@ -80,13 +101,98 @@ class BookingState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Simulated Driver app popup trigger
-  bool _showIncomingRequestPopup = false;
-  bool get showIncomingRequestPopup => _showIncomingRequestPopup;
+  // ─── Register socket event handlers ───
+  void _registerSocketHandlers() {
+    final socket = SocketService.instance;
 
-  Timer? _ringTimer;
+    // Patient: a driver accepted our booking
+    socket.onBookingAccepted = (data) {
+      debugPrint('[BookingState] booking-accepted: $data');
+      _status = BookingStatus.accepted;
+      _showIncomingRequestPopup = false;
 
-  // Set the current logged in role
+      // Extract driver info from the booking response
+      final booking = data['booking'];
+      if (booking != null && booking is Map) {
+        // The booking response contains driver info
+        // The populated driverId field contains driver user details
+        if (booking['driverId'] is Map) {
+          final driverData = booking['driverId'] as Map;
+          _driverName = driverData['fullName']?.toString() ?? 'Driver';
+          _driverPhone = driverData['phone']?.toString() ?? '';
+        }
+      }
+
+      notifyListeners();
+
+      // Fetch route directions for live tracking
+      fetchDirections();
+    };
+
+    // Patient: real-time driver location updates
+    socket.onDriverLocationChanged = (data) {
+      _driverLat = (data['latitude'] as num?)?.toDouble() ?? _driverLat;
+      _driverLng = (data['longitude'] as num?)?.toDouble() ?? _driverLng;
+      notifyListeners();
+    };
+
+    // Both: booking status transitions (enRoute, arrived, completed)
+    socket.onBookingStatusChanged = (data) {
+      final statusStr = data['status']?.toString();
+      debugPrint('[BookingState] booking-status-changed: $statusStr');
+      switch (statusStr) {
+        case 'enRoute':
+          _status = BookingStatus.enRoute;
+          break;
+        case 'arrived':
+          _status = BookingStatus.arrived;
+          break;
+        case 'completed':
+          _status = BookingStatus.completed;
+          break;
+      }
+      notifyListeners();
+    };
+
+    // Driver: incoming booking alert from matchmaker
+    socket.onIncomingBookingAlert = (data) {
+      debugPrint('[BookingState] incoming-booking-alert: $data');
+      _incomingAlertData = data;
+      _showIncomingRequestPopup = true;
+      _bookingId = data['bookingId']?.toString();
+      _serviceType = data['serviceType']?.toString() ?? 'Basic Life Support';
+      _pickupAddress = data['pickupAddress']?.toString() ?? '';
+      _estimatedFare = (data['estimatedFare'] as num?)?.toDouble() ?? 0;
+      _patientName = data['patientName']?.toString() ?? 'Patient';
+      notifyListeners();
+    };
+
+    // Patient: no drivers available
+    socket.onNoDriversAvailable = (data) {
+      debugPrint('[BookingState] no-drivers-available');
+      _noDriversAvailable = true;
+      _status = BookingStatus.idle;
+      notifyListeners();
+    };
+
+    // Both: booking cancelled by the other party
+    socket.onBookingCancelled = (data) {
+      debugPrint('[BookingState] booking-cancelled: $data');
+      _status = BookingStatus.idle;
+      _bookingId = null;
+      _showIncomingRequestPopup = false;
+      notifyListeners();
+    };
+
+    // Driver: accept booking failed
+    socket.onAcceptBookingFailed = (data) {
+      debugPrint('[BookingState] accept-booking-failed: ${data['message']}');
+      _showIncomingRequestPopup = false;
+      notifyListeners();
+    };
+  }
+
+  // ─── Set the current logged in role ───
   Future<void> setRole(UserRole role) async {
     _currentRole = role;
     final prefs = await SharedPreferences.getInstance();
@@ -94,87 +200,152 @@ class BookingState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Set patient details
+  // ─── Set patient details ───
   void setPatientDetails({required String name, required String phone}) {
     _patientName = name;
     notifyListeners();
   }
 
-  // Start booking request (Patient)
-  void requestBooking({required String serviceType, bool isEmergency = false}) {
+  // ═══════════════════════════════════════════════════════
+  //  PATIENT ACTIONS
+  // ═══════════════════════════════════════════════════════
+
+  /// Create a booking request via the REST API.
+  /// For emergency bookings, the backend triggers matchmaking automatically.
+  Future<void> requestBooking({
+    required String serviceType,
+    bool isEmergency = true,
+    String? pickupAddress,
+    double? latitude,
+    double? longitude,
+    double? estimatedFare,
+    DateTime? scheduledTime,
+  }) async {
     _status = BookingStatus.searching;
     _serviceType = serviceType;
-    final now = DateTime.now();
-    _bookingId = "JVN-${now.year}${(now.month).toString().padLeft(2, '0')}${(now.day).toString().padLeft(2, '0')}-${(100 + now.millisecond % 900)}";
-    
-    // Reset driver location to starting offset
-    _driverLat = 12.9850;
-    _driverLng = 77.6080;
-    _simulationStep = 0;
+    _noDriversAvailable = false;
+    _pickupAddress = pickupAddress ?? '';
+    _patientLat = latitude ?? _patientLat;
+    _patientLng = longitude ?? _patientLng;
+    _estimatedFare = estimatedFare ?? 1200;
+    _driverName = "";
+    _driverPhone = "";
     _routePoints = [];
-    _showIncomingRequestPopup = false;
-    _ringTimer?.cancel();
-    _stopSimulation();
-
-    // Trigger driver app ringing simulation after 4 seconds
-    _ringTimer = Timer(const Duration(seconds: 4), () {
-      if (_status == BookingStatus.searching) {
-        _showIncomingRequestPopup = true;
-        notifyListeners();
-      }
-    });
-
     notifyListeners();
+
+    try {
+      final result = await BookingService.instance.createBooking(
+        serviceType: serviceType,
+        pickupAddress: _pickupAddress.isNotEmpty
+            ? _pickupAddress
+            : '${_patientLat.toStringAsFixed(4)}, ${_patientLng.toStringAsFixed(4)}',
+        latitude: _patientLat,
+        longitude: _patientLng,
+        estimatedFare: _estimatedFare,
+        isEmergency: isEmergency,
+        scheduledTime: scheduledTime,
+      );
+
+      final booking = result['booking'] as Map<String, dynamic>?;
+      _bookingId = booking?['id']?.toString() ?? booking?['_id']?.toString();
+      _bookingCreatedAt = DateTime.now();
+      debugPrint('[BookingState] Booking created: $_bookingId');
+      notifyListeners();
+    } on DioException catch (e) {
+      debugPrint('[BookingState] Error creating booking: ${e.response?.data}');
+      _status = BookingStatus.idle;
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  // Accept Booking (Driver)
+  // ═══════════════════════════════════════════════════════
+  //  DRIVER ACTIONS
+  // ═══════════════════════════════════════════════════════
+
+  /// Driver accepts the incoming booking alert.
   void acceptBooking() {
-    if (_status == BookingStatus.searching || _status == BookingStatus.idle) {
-      _status = BookingStatus.accepted;
+    if (_bookingId != null) {
+      SocketService.instance.emitAcceptBooking(_bookingId!);
       _showIncomingRequestPopup = false;
-      _ringTimer?.cancel();
+      // Status will be updated by the server via 'booking-accepted' event
       notifyListeners();
-
-      // Automatically start navigating after 2 seconds
-      Timer(const Duration(seconds: 2), () {
-        if (_status == BookingStatus.accepted) {
-          startEnRoute();
-        }
-      });
     }
   }
 
-  // Start navigation / En Route (Driver)
-  void startEnRoute() async {
-    if (_status == BookingStatus.accepted) {
-      _status = BookingStatus.enRoute;
+  /// Driver declines the incoming booking alert.
+  void declineBooking() {
+    if (_bookingId != null) {
+      SocketService.instance.emitDeclineBooking(_bookingId!);
+      _showIncomingRequestPopup = false;
+      _incomingAlertData = null;
       notifyListeners();
-      await fetchDirections();
-      _startSimulation();
     }
   }
 
-  // Cancel Booking
-  void cancelBooking() {
+  /// Driver starts transit (enRoute).
+  void startEnRoute() {
+    if (_bookingId != null) {
+      SocketService.instance.emitStartTransit(_bookingId!);
+      // Status will be updated by the server via 'booking-status-changed' event
+    }
+  }
+
+  /// Driver marks arrival.
+  void markArrived() {
+    if (_bookingId != null) {
+      SocketService.instance.emitDriverArrived(_bookingId!);
+    }
+  }
+
+  /// Driver completes the trip.
+  void completeBooking() {
+    if (_bookingId != null) {
+      SocketService.instance.emitCompleteTrip(_bookingId!);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  SHARED ACTIONS
+  // ═══════════════════════════════════════════════════════
+
+  /// Cancel booking via REST API.
+  Future<void> cancelBooking() async {
+    if (_bookingId != null) {
+      try {
+        await BookingService.instance.cancelBooking(_bookingId!);
+      } catch (e) {
+        debugPrint('[BookingState] Error cancelling: $e');
+      }
+    }
     _status = BookingStatus.idle;
     _bookingId = null;
     _showIncomingRequestPopup = false;
-    _ringTimer?.cancel();
-    _stopSimulation();
+    _incomingAlertData = null;
     notifyListeners();
   }
 
-  // Reset booking (to request again)
+  /// Reset booking state.
   void reset() {
     _status = BookingStatus.idle;
     _bookingId = null;
     _showIncomingRequestPopup = false;
-    _ringTimer?.cancel();
-    _stopSimulation();
+    _incomingAlertData = null;
+    _noDriversAvailable = false;
     notifyListeners();
   }
 
-  // Open Google Maps navigation (Driver app launcher)
+  /// Clear the "no drivers" flag.
+  void clearNoDriversFlag() {
+    _noDriversAvailable = false;
+    notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  MAPS & DIRECTIONS
+  // ═══════════════════════════════════════════════════════
+
+  /// Open Google Maps navigation (Driver).
   Future<void> launchGoogleMaps() async {
     final String googleMapsUrl = "google.navigation:q=$patientLat,$patientLng";
     final Uri googleMapsUri = Uri.parse(googleMapsUrl);
@@ -194,11 +365,13 @@ class BookingState extends ChangeNotifier {
     }
   }
 
-  // Fetch route directions from Google Directions API
+  /// Fetch route directions from Google Directions API.
   Future<void> fetchDirections() async {
+    if (_driverLat == 0 && _driverLng == 0) return;
+
     const String apiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: 'AIzaSyAVqtwumIuyVmoiTa7yl0A7qOtHV7EEjZs');
     final String url = "https://maps.googleapis.com/maps/api/directions/json"
-        "?origin=12.9850,77.6080"
+        "?origin=$_driverLat,$_driverLng"
         "&destination=$patientLat,$patientLng"
         "&key=$apiKey";
 
@@ -214,6 +387,7 @@ class BookingState extends ChangeNotifier {
             final pointsStr = overviewPolyline["points"] as String;
             _routePoints = decodePolyline(pointsStr);
             debugPrint("Successfully fetched Directions API route: ${_routePoints.length} points");
+            notifyListeners();
             return;
           }
         } else {
@@ -223,25 +397,9 @@ class BookingState extends ChangeNotifier {
     } catch (e) {
       debugPrint("Error fetching directions: $e");
     }
-    // Fallback: If API call fails, generate a simple mock route
-    _generateFallbackRoute();
   }
 
-  void _generateFallbackRoute() {
-    _routePoints = [];
-    const double startLat = 12.9850;
-    const double startLng = 77.6080;
-    const int steps = 15;
-    for (int i = 0; i <= steps; i++) {
-      final double fraction = i / steps;
-      final double lat = startLat + (patientLat - startLat) * fraction;
-      final double lng = startLng + (patientLng - startLng) * fraction;
-      _routePoints.add([lat, lng]);
-    }
-    debugPrint("Generated fallback route: ${_routePoints.length} points");
-  }
-
-  // Decode Google polyline format into list of coordinates
+  /// Decode Google polyline format into list of coordinates.
   List<List<double>> decodePolyline(String encoded) {
     List<List<double>> points = [];
     int index = 0, len = encoded.length;
@@ -272,51 +430,4 @@ class BookingState extends ChangeNotifier {
     return points;
   }
 
-  // Driver Location Simulation
-  void _startSimulation() {
-    _stopSimulation();
-    _simulationStep = 0;
-
-    // Start coordinate simulation en route
-    _simulationTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (_status != BookingStatus.enRoute) {
-        _stopSimulation();
-        return;
-      }
-
-      if (_routePoints.isEmpty) {
-        _generateFallbackRoute();
-      }
-
-      _simulationStep++;
-      if (_simulationStep >= _routePoints.length) {
-        _driverLat = patientLat;
-        _driverLng = patientLng;
-        _status = BookingStatus.arrived;
-        _stopSimulation();
-      } else {
-        final point = _routePoints[_simulationStep];
-        _driverLat = point[0];
-        _driverLng = point[1];
-      }
-      notifyListeners();
-    });
-  }
-
-  void _stopSimulation() {
-    _simulationTimer?.cancel();
-    _simulationTimer = null;
-  }
-
-  void completeBooking() {
-    _status = BookingStatus.completed;
-    _stopSimulation();
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _stopSimulation();
-    super.dispose();
-  }
 }

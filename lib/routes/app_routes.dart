@@ -7,6 +7,7 @@ import '../presentation/booking_confirmation_screen/booking_confirmation_screen.
 import '../presentation/profile_screen/profile_screen.dart';
 import '../presentation/bookings_screen/bookings_screen.dart';
 import '../widgets/app_scaffold.dart';
+import '../core/auth_service.dart';
 
 class AppRoutes {
   static const String initial = '/';
@@ -18,6 +19,23 @@ class AppRoutes {
 
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.initial,
+  redirect: (context, state) {
+    final isLoggedIn = AuthService.instance.isLoggedIn;
+    final isAuthRoute = state.matchedLocation == AppRoutes.initial ||
+        state.matchedLocation == AppRoutes.signUpLogin;
+
+    // If not logged in and trying to access a protected route, redirect to login
+    if (!isLoggedIn && !isAuthRoute) {
+      return AppRoutes.initial;
+    }
+
+    // If logged in and on auth route, redirect to home
+    if (isLoggedIn && isAuthRoute) {
+      return AppRoutes.home;
+    }
+
+    return null; // No redirect needed
+  },
   routes: [
     GoRoute(
       path: AppRoutes.initial,
@@ -87,6 +105,7 @@ final GoRouter appRouter = GoRouter(
             scheduledDate: extra?['scheduledDate'] as String?,
             scheduledTime: extra?['scheduledTime'] as String?,
             isEmergency: extra?['isEmergency'] as bool? ?? false,
+            bookingId: extra?['bookingId'] as String?,
           ),
           transitionDuration: const Duration(milliseconds: 350),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -140,4 +159,3 @@ final GoRouter appRouter = GoRouter(
     ),
   ],
 );
-

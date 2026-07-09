@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../sign_up_login_screen.dart';
 import '../../../core/booking_state.dart';
+import '../../../core/auth_service.dart';
+import '../../../core/socket_service.dart';
 
 class AuthFormWidget extends StatefulWidget {
   final AuthMode authMode;
@@ -26,10 +31,25 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _pincodeController = TextEditingController();
   final _ambulanceIdController = TextEditingController();
+  final _experienceController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
   bool _isGoogleLoading = false;
+
+  String _selectedGender = 'Male';
+  String _selectedVehicleType = 'Basic Life Support';
+  LatLng? _driverLocation;
+
+  final List<String> _genderOptions = ['Male', 'Female', 'Other', 'Prefer not to say'];
+  final List<String> _vehicleTypes = [
+    'Basic Life Support',
+    'Advanced Life Support',
+    'Neonatal Ambulance',
+    'Patient Transport',
+  ];
 
   static const String _webClientId = String.fromEnvironment(
     'GOOGLE_WEB_CLIENT_ID',
@@ -47,36 +67,110 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
     _passwordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
+    _addressController.dispose();
+    _pincodeController.dispose();
     _ambulanceIdController.dispose();
+    _experienceController.dispose();
     super.dispose();
   }
 
   Future<void> _handleSubmit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) {
-      setState(() => _isLoading = false);
-      await BookingState.instance.setRole(widget.selectedRole);
-      
-      // Customize names for demo or signup
+
+    try {
       if (widget.authMode == AuthMode.signUp) {
-        BookingState.instance.setPatientDetails(
-          name: _nameController.text.isNotEmpty ? _nameController.text : "Priya Sharma",
-          phone: _phoneController.text.isNotEmpty ? _phoneController.text : "+91 98765 43210",
+        // ── Sign Up ──
+        await AuthService.instance.signup(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          fullName: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          role: widget.selectedRole == UserRole.driver ? 'driver' : 'patient',
+          gender: _selectedGender,
+          address: _addressController.text.trim(),
+          pincode: _pincodeController.text.trim(),
+          vehicleRegNo: widget.selectedRole == UserRole.driver
+              ? _ambulanceIdController.text.trim()
+              : null,
+          vehicleType: widget.selectedRole == UserRole.driver
+              ? _selectedVehicleType
+              : null,
+          experience: widget.selectedRole == UserRole.driver
+              ? _experienceController.text.trim()
+              : null,
+          latitude: _driverLocation?.latitude,
+          longitude: _driverLocation?.longitude,
+        );
+
+        // After successful signup, login to get the JWT token
+        await AuthService.instance.login(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
         );
       } else {
-        if (_emailController.text == 'rajan.patel@jivandhara.in') {
-          // Driver
-        } else {
-          // Patient
-          BookingState.instance.setPatientDetails(
-            name: "Priya Sharma",
-            phone: "+91 98765 43210",
-          );
-        }
+        // ── Sign In ──
+        await AuthService.instance.login(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
       }
-      widget.onSubmit();
+
+      // Update BookingState with the real user role
+      final role = AuthService.instance.role;
+      await BookingState.instance.setRole(
+        role == 'driver' ? UserRole.driver : UserRole.patient,
+      );
+
+      BookingState.instance.setPatientDetails(
+        name: AuthService.instance.fullName ?? 'User',
+        phone: AuthService.instance.phone ?? '',
+      );
+
+      // Connect socket with the JWT token
+      SocketService.instance.connect(token: AuthService.instance.token);
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+        widget.onSubmit();
+      }
+    } on DioException catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        final message = e.response?.data is Map
+            ? (e.response!.data as Map)['message'] ?? 'Something went wrong'
+            : 'Network error. Is the backend running?';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              message.toString(),
+              style: GoogleFonts.plusJakartaSans(fontSize: 14),
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error: $e',
+              style: GoogleFonts.plusJakartaSans(fontSize: 14),
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -87,8 +181,8 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
       if (account != null && mounted) {
         await BookingState.instance.setRole(widget.selectedRole);
         BookingState.instance.setPatientDetails(
-          name: account.displayName ?? "Priya Sharma",
-          phone: "+91 98765 43210",
+          name: account.displayName ?? "User",
+          phone: "+91 00000 00000",
         );
         widget.onSubmit();
       }
@@ -110,6 +204,39 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
       }
     } finally {
       if (mounted) setState(() => _isGoogleLoading = false);
+    }
+  }
+
+  Future<void> _openLocationPicker() async {
+    // Get current location as initial position
+    LatLng initialPosition = const LatLng(12.9716, 77.5946); // Default: Bengaluru
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+      initialPosition = LatLng(pos.latitude, pos.longitude);
+    } catch (_) {
+      // Use default if location unavailable
+    }
+
+    if (!mounted) return;
+
+    final LatLng? result = await showModalBottomSheet<LatLng>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _LocationPickerSheet(initialPosition: _driverLocation ?? initialPosition),
+    );
+
+    if (result != null) {
+      setState(() => _driverLocation = result);
     }
   }
 
@@ -142,15 +269,55 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
                   : null,
             ),
             const SizedBox(height: 14),
+            // Gender selector
+            _buildGenderSelector(theme),
+            const SizedBox(height: 14),
+            _buildField(
+              controller: _addressController,
+              label: 'Address',
+              hint: '12, Shanti Nagar, Bhopal, MP',
+              icon: Icons.home_outlined,
+              validator: (v) =>
+                  (v == null || v.isEmpty) ? 'Enter your address' : null,
+            ),
+            const SizedBox(height: 14),
+            _buildField(
+              controller: _pincodeController,
+              label: 'Pincode',
+              hint: '462001',
+              icon: Icons.pin_drop_outlined,
+              keyboardType: TextInputType.number,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Enter your pincode';
+                if (v.trim().length != 6 || int.tryParse(v.trim()) == null) {
+                  return 'Enter a valid 6-digit pincode';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
             if (widget.selectedRole == UserRole.driver) ...[
               _buildField(
                 controller: _ambulanceIdController,
-                label: 'Ambulance ID',
-                hint: 'e.g. AMB-2024-001',
+                label: 'Vehicle Registration No.',
+                hint: 'e.g. KA 01 AB 2345',
                 icon: Icons.local_hospital_outlined,
                 validator: (v) =>
-                    (v == null || v.isEmpty) ? 'Enter your ambulance ID' : null,
+                    (v == null || v.isEmpty) ? 'Enter your vehicle reg. no.' : null,
               ),
+              const SizedBox(height: 14),
+              _buildVehicleTypeSelector(theme),
+              const SizedBox(height: 14),
+              _buildField(
+                controller: _experienceController,
+                label: 'Experience',
+                hint: 'e.g. 5 years',
+                icon: Icons.work_outline_rounded,
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? 'Enter your experience' : null,
+              ),
+              const SizedBox(height: 14),
+              _buildLocationPicker(theme),
               const SizedBox(height: 14),
             ],
           ],
@@ -173,6 +340,180 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
           _buildGoogleSignInButton(theme),
         ],
       ),
+    );
+  }
+
+  Widget _buildGenderSelector(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.wc_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              'Gender',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _genderOptions.map((gender) {
+            final isSelected = _selectedGender == gender;
+            return GestureDetector(
+              onTap: () => setState(() => _selectedGender = gender),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
+                  ),
+                ),
+                child: Text(
+                  gender,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVehicleTypeSelector(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.local_shipping_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              'Vehicle Type',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _vehicleTypes.map((type) {
+            final isSelected = _selectedVehicleType == type;
+            return GestureDetector(
+              onTap: () => setState(() => _selectedVehicleType = type),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
+                  ),
+                ),
+                child: Text(
+                  type,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationPicker(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.my_location_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              'Your Base Location',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _openLocationPicker,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.colorScheme.outline),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _driverLocation != null ? Icons.check_circle_rounded : Icons.map_outlined,
+                  size: 20,
+                  color: _driverLocation != null
+                      ? const Color(0xFF2E7D32)
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _driverLocation != null
+                        ? 'Location set (${_driverLocation!.latitude.toStringAsFixed(4)}, ${_driverLocation!.longitude.toStringAsFixed(4)})'
+                        : 'Tap to pick your location on map',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: _driverLocation != null
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -347,6 +688,163 @@ class _AuthFormWidgetState extends State<AuthFormWidget> {
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════
+//  Location Picker Bottom Sheet
+// ═══════════════════════════════════════════════════════
+
+class _LocationPickerSheet extends StatefulWidget {
+  final LatLng initialPosition;
+  const _LocationPickerSheet({required this.initialPosition});
+
+  @override
+  State<_LocationPickerSheet> createState() => _LocationPickerSheetState();
+}
+
+class _LocationPickerSheetState extends State<_LocationPickerSheet> {
+  late LatLng _selectedPosition;
+  // ignore: unused_field
+  GoogleMapController? _mapController;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPosition = widget.initialPosition;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(60),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.my_location_rounded, color: theme.colorScheme.primary, size: 22),
+                const SizedBox(width: 10),
+                Text(
+                  'Pick Your Base Location',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Drag the map to adjust your location. The pin stays in the center.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: _selectedPosition,
+                        zoom: 15,
+                      ),
+                      onMapCreated: (controller) => _mapController = controller,
+                      onCameraMove: (position) {
+                        _selectedPosition = position.target;
+                      },
+                      onCameraIdle: () {
+                        setState(() {});
+                      },
+                      myLocationEnabled: true,
+                      myLocationButtonEnabled: true,
+                      zoomControlsEnabled: false,
+                      mapToolbarEnabled: false,
+                    ),
+                    // Center pin
+                    Icon(
+                      Icons.location_pin,
+                      size: 40,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              '${_selectedPosition.latitude.toStringAsFixed(5)}, ${_selectedPosition.longitude.toStringAsFixed(5)}',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pop(_selectedPosition),
+                icon: const Icon(Icons.check_rounded, size: 20),
+                label: Text(
+                  'Confirm Location',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Google Logo Painter (preserved from original)
+// ═══════════════════════════════════════════════════════
 
 class _GoogleLogoIcon extends StatelessWidget {
   @override

@@ -3,10 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
 
 import '../core/app_export.dart';
+import '../core/auth_service.dart';
+import '../core/socket_service.dart';
 import '../widgets/custom_error_widget.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize auth service (load token from SharedPreferences)
+  await AuthService.instance.init();
+
+  // If already logged in, connect the socket
+  if (AuthService.instance.isLoggedIn) {
+    SocketService.instance.connect(token: AuthService.instance.token);
+  }
 
   bool hasShownError = false;
 
@@ -34,8 +44,39 @@ void main() async {
   });
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SocketService.instance.disconnect();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // App is going to background — disconnect socket to save battery
+      SocketService.instance.disconnect();
+    } else if (state == AppLifecycleState.resumed) {
+      // App is back in foreground — reconnect socket if logged in
+      if (AuthService.instance.isLoggedIn) {
+        SocketService.instance.connect(token: AuthService.instance.token);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

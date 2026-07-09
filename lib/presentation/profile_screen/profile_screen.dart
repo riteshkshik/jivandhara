@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
+import 'package:dio/dio.dart';
 import '../../core/profile_notifier.dart';
+import '../../core/auth_service.dart';
+import '../../core/profile_service.dart';
 import '../../theme/app_theme.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -15,26 +17,41 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _fullNameController = TextEditingController(text: 'Ravi Sharma');
-  final _contactController = TextEditingController(text: '+91 98765 43210');
-  final _emailController = TextEditingController(text: 'ravi.sharma@email.com');
-  final _addressController = TextEditingController(
-    text: '12, Shanti Nagar, Bhopal, Madhya Pradesh - 462001',
-  );
-  final _pincodeController = TextEditingController(text: '462001');
+  final _fullNameController = TextEditingController();
+  final _contactController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _pincodeController = TextEditingController();
 
-  // Profile image URL (in a real app this would be picked by user)
-  String _profileImageUrl =
-      'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=300';
+  // Driver-specific controllers
+  final _vehicleRegNoController = TextEditingController();
+  final _experienceController = TextEditingController();
+
+  // Profile image URL
+  String _profileImageUrl = '';
 
   String _selectedGender = 'Male';
+  String _userRole = 'patient';
   bool _isEditing = false;
+  bool _isLoading = true;
+  bool _isSaving = false;
+
+  // Driver-specific fields
+  String _vehicleType = 'Basic Life Support';
+  bool _isOnline = false;
 
   final List<String> _genderOptions = [
     'Male',
     'Female',
     'Other',
     'Prefer not to say',
+  ];
+
+  final List<String> _vehicleTypes = [
+    'Basic Life Support',
+    'Advanced Life Support',
+    'Neonatal Ambulance',
+    'Patient Transport',
   ];
 
   @override
@@ -44,60 +61,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _emailController.dispose();
     _addressController.dispose();
     _pincodeController.dispose();
+    _vehicleRegNoController.dispose();
+    _experienceController.dispose();
     super.dispose();
   }
 
   @override
   void initState() {
     super.initState();
-    _loadSavedProfile();
+    _loadProfile();
   }
 
-  Future<void> _loadSavedProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedName = prefs.getString('profile_full_name');
-    final savedContact = prefs.getString('profile_contact');
-    final savedEmail = prefs.getString('profile_email');
-    final savedAddress = prefs.getString('profile_address');
-    final savedPincode = prefs.getString('profile_pincode');
-    final savedGender = prefs.getString('profile_gender');
-    final savedImage = prefs.getString('profile_image_url');
-    if (mounted) {
-      setState(() {
-        if (savedName != null && savedName.isNotEmpty) {
-          _fullNameController.text = savedName;
-        }
-        if (savedContact != null && savedContact.isNotEmpty) {
-          _contactController.text = savedContact;
-        }
-        if (savedEmail != null && savedEmail.isNotEmpty) {
-          _emailController.text = savedEmail;
-        }
-        if (savedAddress != null && savedAddress.isNotEmpty) {
-          _addressController.text = savedAddress;
-        }
-        if (savedPincode != null && savedPincode.isNotEmpty) {
-          _pincodeController.text = savedPincode;
-        }
-        if (savedGender != null && savedGender.isNotEmpty) {
-          _selectedGender = savedGender;
-        }
-        if (savedImage != null && savedImage.isNotEmpty) {
-          _profileImageUrl = savedImage;
-        }
-      });
+  Future<void> _loadProfile() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await ProfileService.instance.getProfile();
+      final user = data['user'] as Map<String, dynamic>?;
+      final driverProfile = data['driverProfile'] as Map<String, dynamic>?;
+
+      if (user != null && mounted) {
+        setState(() {
+          _fullNameController.text = user['fullName']?.toString() ?? '';
+          _contactController.text = user['phone']?.toString() ?? '';
+          _emailController.text = user['email']?.toString() ?? '';
+          _addressController.text = user['address']?.toString() ?? '';
+          _pincodeController.text = user['pincode']?.toString() ?? '';
+          _selectedGender = user['gender']?.toString() ?? 'Male';
+          _profileImageUrl = user['profileImageUrl']?.toString() ?? '';
+          _userRole = user['role']?.toString() ?? 'patient';
+
+          if (driverProfile != null) {
+            _vehicleRegNoController.text = driverProfile['vehicleRegNo']?.toString() ?? '';
+            _vehicleType = driverProfile['vehicleType']?.toString() ?? 'Basic Life Support';
+            _experienceController.text = driverProfile['experience']?.toString() ?? '';
+            _isOnline = driverProfile['isOnline'] == true;
+          }
+        });
+      }
+    } on DioException catch (e) {
+      debugPrint('[ProfileScreen] Error loading profile: ${e.message}');
+      // Fallback to auth service cached data
+      if (mounted) {
+        setState(() {
+          _fullNameController.text = AuthService.instance.fullName ?? '';
+          _contactController.text = AuthService.instance.phone ?? '';
+          _emailController.text = AuthService.instance.email ?? '';
+          _profileImageUrl = AuthService.instance.profileImageUrl ?? '';
+          _userRole = AuthService.instance.role ?? 'patient';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Future<void> _saveProfileToPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('profile_full_name', _fullNameController.text.trim());
-    await prefs.setString('profile_contact', _contactController.text.trim());
-    await prefs.setString('profile_email', _emailController.text.trim());
-    await prefs.setString('profile_address', _addressController.text.trim());
-    await prefs.setString('profile_pincode', _pincodeController.text.trim());
-    await prefs.setString('profile_gender', _selectedGender);
-    await prefs.setString('profile_image_url', _profileImageUrl);
   }
 
   void _toggleEdit() {
@@ -106,34 +121,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  void _saveProfile() {
-    if (_formKey.currentState?.validate() ?? false) {
-      _saveProfileToPrefs().then((_) {
-        ProfileNotifier.instance.notifyProfileUpdated();
-      });
-      setState(() {
-        _isEditing = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Profile updated successfully',
-            style: GoogleFonts.plusJakartaSans(fontSize: 14),
-          ),
-          backgroundColor: AppTheme.success,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10.0),
-          ),
-          margin: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
-        ),
+  Future<void> _saveProfile() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _isSaving = true);
+    try {
+      await ProfileService.instance.updateProfile(
+        fullName: _fullNameController.text.trim(),
+        phone: _contactController.text.trim(),
+        address: _addressController.text.trim(),
+        pincode: _pincodeController.text.trim(),
+        gender: _selectedGender,
+        vehicleRegNo: _userRole == 'driver' ? _vehicleRegNoController.text.trim() : null,
+        vehicleType: _userRole == 'driver' ? _vehicleType : null,
+        experience: _userRole == 'driver' ? _experienceController.text.trim() : null,
+        isOnline: _userRole == 'driver' ? _isOnline : null,
       );
+
+      ProfileNotifier.instance.notifyProfileUpdated();
+      if (mounted) {
+        setState(() {
+          _isEditing = false;
+          _isSaving = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Profile updated successfully',
+              style: GoogleFonts.plusJakartaSans(fontSize: 14),
+            ),
+            backgroundColor: AppTheme.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10.0),
+            ),
+            margin: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
+          ),
+        );
+      }
+    } on DioException catch (e) {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        final message = e.response?.data is Map
+            ? (e.response!.data as Map)['message'] ?? 'Failed to update profile'
+            : 'Network error';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message.toString(), style: GoogleFonts.plusJakartaSans(fontSize: 14)),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+            margin: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppTheme.backgroundLight,
+        appBar: AppBar(
+          backgroundColor: AppTheme.surfaceLight,
+          elevation: 0,
+          title: Text(
+            'My Profile',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 18, fontWeight: FontWeight.w700, color: const Color(0xFF1A1A1A),
+            ),
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundLight,
@@ -152,17 +216,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (!_isEditing)
             TextButton.icon(
               onPressed: _toggleEdit,
-              icon: const Icon(
-                Icons.edit_outlined,
-                size: 18,
-                color: AppTheme.primary,
-              ),
+              icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.primary),
               label: Text(
                 'Edit',
                 style: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.primary,
+                  fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary,
                 ),
               ),
             )
@@ -200,10 +258,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           height: 25.w,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.primary,
-                              width: 3,
-                            ),
+                            border: Border.all(color: AppTheme.primary, width: 3),
                             boxShadow: [
                               BoxShadow(
                                 color: AppTheme.primary.withAlpha(40),
@@ -213,21 +268,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ],
                           ),
                           child: ClipOval(
-                            child: Image.network(
-                              _profileImageUrl,
-                              fit: BoxFit.cover,
-                              semanticLabel:
-                                  'Profile photo of a man with short hair smiling',
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Container(
-                                    color: AppTheme.primaryContainer,
-                                    child: Icon(
-                                      Icons.person_rounded,
-                                      size: 14.w,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                            ),
+                            child: _profileImageUrl.isNotEmpty
+                                ? Image.network(
+                                    _profileImageUrl,
+                                    fit: BoxFit.cover,
+                                    semanticLabel: 'Profile photo',
+                                    errorBuilder: (context, error, stackTrace) => _buildAvatarFallback(),
+                                  )
+                                : _buildAvatarFallback(),
                           ),
                         ),
                         if (_isEditing)
@@ -235,20 +283,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             onTap: () {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    'Photo upload coming soon',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 13,
-                                    ),
-                                  ),
+                                  content: Text('Photo upload coming soon',
+                                      style: GoogleFonts.plusJakartaSans(fontSize: 13)),
                                   behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10.0),
-                                  ),
-                                  margin: EdgeInsets.symmetric(
-                                    horizontal: 4.w,
-                                    vertical: 1.h,
-                                  ),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+                                  margin: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
                                 ),
                               );
                             },
@@ -258,23 +297,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               decoration: BoxDecoration(
                                 color: AppTheme.primary,
                                 shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2,
-                                ),
+                                border: Border.all(color: Colors.white, width: 2),
                               ),
-                              child: const Icon(
-                                Icons.camera_alt_rounded,
-                                color: Colors.white,
-                                size: 16,
-                              ),
+                              child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 16),
                             ),
                           ),
                       ],
                     ),
                     SizedBox(height: 1.h),
                     Text(
-                      _fullNameController.text,
+                      _fullNameController.text.isNotEmpty ? _fullNameController.text : 'User',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 16.sp > 20 ? 20 : 16.sp,
                         fontWeight: FontWeight.w700,
@@ -284,20 +316,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     SizedBox(height: 0.4.h),
                     Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 3.w,
-                        vertical: 0.5.h,
-                      ),
+                      padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 0.5.h),
                       decoration: BoxDecoration(
                         color: AppTheme.primaryContainer,
                         borderRadius: BorderRadius.circular(20.0),
                       ),
                       child: Text(
-                        'Patient',
+                        _userRole == 'driver' ? 'Driver' : 'Patient',
                         style: GoogleFonts.plusJakartaSans(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
+                          fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary,
                         ),
                       ),
                     ),
@@ -317,9 +344,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: 'Full Name',
                     icon: Icons.badge_outlined,
                     enabled: _isEditing,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Full name is required'
-                        : null,
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Full name is required' : null,
                   ),
                   SizedBox(height: 2.h),
                   _buildGenderField(),
@@ -339,24 +365,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     icon: Icons.phone_outlined,
                     enabled: _isEditing,
                     keyboardType: TextInputType.phone,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Contact number is required'
-                        : null,
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Contact number is required' : null,
                   ),
                   SizedBox(height: 2.h),
                   _buildTextField(
                     controller: _emailController,
                     label: 'Email Address',
                     icon: Icons.email_outlined,
-                    enabled: _isEditing,
+                    enabled: false, // Email can't be changed
                     keyboardType: TextInputType.emailAddress,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Email is required';
-                      }
-                      if (!v.contains('@')) return 'Enter a valid email';
-                      return null;
-                    },
                   ),
                 ],
               ),
@@ -374,9 +392,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     icon: Icons.location_on_outlined,
                     enabled: _isEditing,
                     maxLines: 3,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Address is required'
-                        : null,
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Address is required' : null,
                   ),
                   SizedBox(height: 2.h),
                   _buildTextField(
@@ -386,11 +403,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     enabled: _isEditing,
                     keyboardType: TextInputType.number,
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Pincode is required';
-                      }
-                      if (v.trim().length != 6 ||
-                          int.tryParse(v.trim()) == null) {
+                      if (v == null || v.trim().isEmpty) return 'Pincode is required';
+                      if (v.trim().length != 6 || int.tryParse(v.trim()) == null) {
                         return 'Enter a valid 6-digit pincode';
                       }
                       return null;
@@ -399,6 +413,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
 
+              // Driver-specific section
+              if (_userRole == 'driver') ...[
+                SizedBox(height: 2.h),
+                _buildSectionCard(
+                  title: 'Vehicle Information',
+                  icon: Icons.local_shipping_outlined,
+                  children: [
+                    _buildTextField(
+                      controller: _vehicleRegNoController,
+                      label: 'Vehicle Reg. No.',
+                      icon: Icons.directions_car_outlined,
+                      enabled: _isEditing,
+                    ),
+                    SizedBox(height: 2.h),
+                    _buildVehicleTypeField(),
+                    SizedBox(height: 2.h),
+                    _buildTextField(
+                      controller: _experienceController,
+                      label: 'Experience',
+                      icon: Icons.work_outline_rounded,
+                      enabled: _isEditing,
+                    ),
+                  ],
+                ),
+              ],
+
               SizedBox(height: 3.h),
 
               // Save Button
@@ -406,7 +446,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _saveProfile,
+                    onPressed: _isSaving ? null : _saveProfile,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -415,13 +455,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         borderRadius: BorderRadius.circular(12.0),
                       ),
                     ),
-                    child: Text(
-                      'Save Changes',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                          )
+                        : Text(
+                            'Save Changes',
+                            style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w600),
+                          ),
                   ),
                 ),
 
@@ -430,6 +472,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildAvatarFallback() {
+    return Container(
+      color: AppTheme.primaryContainer,
+      child: Icon(Icons.person_rounded, size: 14.w, color: AppTheme.primary),
     );
   }
 
@@ -499,8 +548,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(
-          icon,
-          size: 20,
+          icon, size: 20,
           color: enabled ? AppTheme.primary : const Color(0xFF9E9E9E),
         ),
         filled: true,
@@ -536,20 +584,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Row(
           children: [
-            Icon(
-              Icons.wc_outlined,
-              size: 20,
-              color: _isEditing ? AppTheme.primary : const Color(0xFF9E9E9E),
-            ),
+            Icon(Icons.wc_outlined, size: 20,
+                color: _isEditing ? AppTheme.primary : const Color(0xFF9E9E9E)),
             SizedBox(width: 2.w),
-            Text(
-              'Gender',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: const Color(0xFF9E9E9E),
-              ),
-            ),
+            Text('Gender', style: GoogleFonts.plusJakartaSans(
+                fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF9E9E9E))),
           ],
         ),
         SizedBox(height: 1.h),
@@ -562,14 +601,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               borderRadius: BorderRadius.circular(12.0),
               border: Border.all(color: const Color(0xFFEEEEEE)),
             ),
-            child: Text(
-              _selectedGender,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: const Color(0xFF555555),
-              ),
-            ),
+            child: Text(_selectedGender, style: GoogleFonts.plusJakartaSans(
+                fontSize: 14, fontWeight: FontWeight.w500, color: const Color(0xFF555555))),
           )
         else
           Wrap(
@@ -581,31 +614,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => setState(() => _selectedGender = gender),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  padding: EdgeInsets.symmetric(
-                    horizontal: 3.5.w,
-                    vertical: 1.h,
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 3.5.w, vertical: 1.h),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.primary
-                        : const Color(0xFFF7F7F7),
+                    color: isSelected ? AppTheme.primary : const Color(0xFFF7F7F7),
                     borderRadius: BorderRadius.circular(20.0),
                     border: Border.all(
-                      color: isSelected
-                          ? AppTheme.primary
-                          : const Color(0xFFDDDDDD),
+                      color: isSelected ? AppTheme.primary : const Color(0xFFDDDDDD),
                     ),
                   ),
-                  child: Text(
-                    gender,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected
-                          ? Colors.white
-                          : const Color(0xFF555555),
+                  child: Text(gender, style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13, fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : const Color(0xFF555555),
+                  )),
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildVehicleTypeField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.local_shipping_outlined, size: 20,
+                color: _isEditing ? AppTheme.primary : const Color(0xFF9E9E9E)),
+            SizedBox(width: 2.w),
+            Text('Vehicle Type', style: GoogleFonts.plusJakartaSans(
+                fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF9E9E9E))),
+          ],
+        ),
+        SizedBox(height: 1.h),
+        if (!_isEditing)
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.8.h),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F0F0),
+              borderRadius: BorderRadius.circular(12.0),
+              border: Border.all(color: const Color(0xFFEEEEEE)),
+            ),
+            child: Text(_vehicleType, style: GoogleFonts.plusJakartaSans(
+                fontSize: 14, fontWeight: FontWeight.w500, color: const Color(0xFF555555))),
+          )
+        else
+          Wrap(
+            spacing: 2.w,
+            runSpacing: 1.h,
+            children: _vehicleTypes.map((type) {
+              final isSelected = _vehicleType == type;
+              return GestureDetector(
+                onTap: () => setState(() => _vehicleType = type),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 1.h),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppTheme.primary : const Color(0xFFF7F7F7),
+                    borderRadius: BorderRadius.circular(20.0),
+                    border: Border.all(
+                      color: isSelected ? AppTheme.primary : const Color(0xFFDDDDDD),
                     ),
                   ),
+                  child: Text(type, style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12, fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : const Color(0xFF555555),
+                  )),
                 ),
               );
             }).toList(),

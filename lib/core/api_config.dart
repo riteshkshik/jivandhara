@@ -5,8 +5,8 @@
 /// and every API / socket call will automatically use the new URL.
 class ApiConfig {
   /// Base URL for REST API calls (Express server).
-  static const String baseUrl = 'http://localhost:5000';
+  static const String baseUrl = 'http://192.168.1.11:5000';
 
   /// Base URL for Socket.io connections.
-  static const String socketUrl = 'http://localhost:5000';
+  static const String socketUrl = 'http://192.168.1.11:5000';
 }
